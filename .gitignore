@@ -1,0 +1,12 @@
+build/
+.macos/
+.android/
+.ios/
+.flutter-plugins
+.packages
+.pub-cache
+pubspec.lock
+models/*.mlmodelc
+models/*.mlmodel
+downloads/
+ios/Pods
