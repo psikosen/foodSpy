@@ -32,6 +32,9 @@ class _CameraScreenState extends State<CameraScreen> {
   int _maskHeight = 0;
   double _backgroundDepth = 0;
   double _pixelSizeCm = 0.1;
+  List<double> _depthValues = const [];
+  int _depthWidth = 0;
+  int _depthHeight = 0;
 
   @override
   void initState() {
@@ -63,11 +66,26 @@ class _CameraScreenState extends State<CameraScreen> {
         setState(() => _capturing = false);
         return;
       }
-      _backgroundDepth = (frame['backgroundDepth'] as num).toDouble();
-      _pixelSizeCm = (frame['pixelSizeCm'] as num).toDouble();
-      _maskWidth = frame['width'] as int;
-      _maskHeight = frame['height'] as int;
-      setState(() => _capturing = false);
+      final depthValues = (frame['depthValues'] as List?)
+              ?.map((value) => (value as num).toDouble())
+              .toList() ??
+          const [];
+      _backgroundDepth = (frame['backgroundDepth'] as num?)?.toDouble() ?? 0;
+      _pixelSizeCm = (frame['pixelSizeCm'] as num?)?.toDouble() ?? 0.1;
+      _maskWidth = frame['width'] as int? ?? 0;
+      _maskHeight = frame['height'] as int? ?? 0;
+      _depthWidth = frame['depthWidth'] as int? ?? 0;
+      _depthHeight = frame['depthHeight'] as int? ?? 0;
+      if (depthValues.isEmpty || _depthWidth == 0 || _depthHeight == 0) {
+        Fluttertoast.showToast(msg: 'Depth map unavailable. Please recapture.');
+        setState(() => _capturing = false);
+        return;
+      }
+      setState(() {
+        _capturing = false;
+        _depthValues = depthValues;
+        _mask = null;
+      });
       Fluttertoast.showToast(msg: 'Capture saved. Tap to segment.');
     } catch (e) {
       Fluttertoast.showToast(msg: 'Capture failed: $e');
@@ -92,16 +110,37 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   void _openFoodSelector() {
-    if (_mask == null) return;
+    if (_mask == null) {
+      return;
+    }
+    if (_maskWidth == 0 || _maskHeight == 0) {
+      Fluttertoast.showToast(msg: 'Mask dimensions missing. Capture again.');
+      return;
+    }
+    if (_depthValues.isEmpty || _depthWidth == 0 || _depthHeight == 0) {
+      Fluttertoast.showToast(msg: 'Depth data missing. Capture again.');
+      return;
+    }
+    final resizedMask = _resizeMask(
+      mask: _mask!,
+      sourceWidth: _maskWidth,
+      sourceHeight: _maskHeight,
+      targetWidth: _depthWidth,
+      targetHeight: _depthHeight,
+    );
+    if (resizedMask.isEmpty) {
+      Fluttertoast.showToast(msg: 'Failed to align mask with depth map. Recapture and retry.');
+      return;
+    }
     final calculator = VolumeCalculator(
       backgroundDepthCm: _backgroundDepth,
       pixelSizeCm: _pixelSizeCm,
     );
     final volume = calculator.calculate(
-      List<double>.filled(_mask!.length, _backgroundDepth - 0.5),
-      _mask!.map((b) => b > 0 ? 1 : 0).toList(),
+      _depthValues,
+      resizedMask,
     );
-    final area = _mask!.where((b) => b > 0).length * _pixelSizeCm * _pixelSizeCm;
+    final area = resizedMask.where((b) => b > 0).length * _pixelSizeCm * _pixelSizeCm;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -116,6 +155,30 @@ class _CameraScreenState extends State<CameraScreen> {
         onSelected: (_, __) {},
       ),
     );
+  }
+
+  List<int> _resizeMask({
+    required Uint8List mask,
+    required int sourceWidth,
+    required int sourceHeight,
+    required int targetWidth,
+    required int targetHeight,
+  }) {
+    if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
+      return const [];
+    }
+    if (sourceWidth == targetWidth && sourceHeight == targetHeight) {
+      return mask.map((value) => value > 0 ? 1 : 0).toList();
+    }
+    final output = List<int>.filled(targetWidth * targetHeight, 0);
+    for (var y = 0; y < targetHeight; y++) {
+      final sourceY = (y * sourceHeight ~/ targetHeight).clamp(0, sourceHeight - 1) as int;
+      for (var x = 0; x < targetWidth; x++) {
+        final sourceX = (x * sourceWidth ~/ targetWidth).clamp(0, sourceWidth - 1) as int;
+        output[y * targetWidth + x] = mask[sourceY * sourceWidth + sourceX] > 0 ? 1 : 0;
+      }
+    }
+    return output;
   }
 
   @override

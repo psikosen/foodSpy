@@ -135,16 +135,27 @@ final class NativeCameraController: NSObject, AVCapturePhotoCaptureDelegate, AVC
     let tempDir = FileManager.default.temporaryDirectory
     let imageURL = tempDir.appendingPathComponent("capture.jpg")
     let depthURL = tempDir.appendingPathComponent("depth_map.tif")
+    var depthValues: [Double] = []
+    var depthWidth = 0
+    var depthHeight = 0
+    var pixelSizeCm = 0.05
+    var backgroundDepth = 0.0
     do {
       try image.jpegData(compressionQuality: 0.95)?.write(to: imageURL)
       if let depth = depthData {
-        let converted = depth.converting(toDepthDataType: kCVPixelFormatType_DisparityFloat32)
+        let converted = depth.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
         if let depthBuffer = converted.depthDataMap {
           let ciImage = CIImage(cvPixelBuffer: depthBuffer)
           let context = CIContext(options: nil)
           if let depthTiff = context.tiffRepresentation(of: ciImage, format: .Lf, colorSpace: CGColorSpaceCreateDeviceGray()) {
             try depthTiff.write(to: depthURL)
           }
+          let export = Self.exportDepthBuffer(depthBuffer)
+          depthValues = export.values
+          depthWidth = export.width
+          depthHeight = export.height
+          pixelSizeCm = export.pixelSizeCm
+          backgroundDepth = export.backgroundDepth
         }
       }
       let payload: [String: Any] = [
@@ -153,13 +164,49 @@ final class NativeCameraController: NSObject, AVCapturePhotoCaptureDelegate, AVC
         "width": Int(latestDimensions.width),
         "height": Int(latestDimensions.height),
         "laplacian": latestLaplacian,
-        "backgroundDepth": latestDepthData?.depthDataAccuracy.rawValue ?? 1.0,
-        "pixelSizeCm": 0.05,
+        "backgroundDepth": backgroundDepth,
+        "pixelSizeCm": pixelSizeCm,
+        "depthValues": depthValues,
+        "depthWidth": depthWidth,
+        "depthHeight": depthHeight,
       ]
       completion(payload, nil)
     } catch {
       completion(nil, error)
     }
+  }
+
+  private static func exportDepthBuffer(_ buffer: CVPixelBuffer) -> (values: [Double], width: Int, height: Int, pixelSizeCm: Double, backgroundDepth: Double) {
+    CVPixelBufferLockBaseAddress(buffer, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+
+    guard let baseAddress = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: Float32.self) else {
+      return ([], 0, 0, 0.0, 0.0)
+    }
+
+    let width = CVPixelBufferGetWidth(buffer)
+    let height = CVPixelBufferGetHeight(buffer)
+    let stride = CVPixelBufferGetBytesPerRow(buffer) / MemoryLayout<Float32>.size
+
+    let downsampleFactor = max(1, width / 256)
+    let targetWidth = max(1, width / downsampleFactor)
+    let targetHeight = max(1, height / downsampleFactor)
+
+    var output = [Double]()
+    output.reserveCapacity(targetWidth * targetHeight)
+
+    for y in stride(from: 0, to: height, by: downsampleFactor) {
+      let row = baseAddress.advanced(by: y * stride)
+      for x in stride(from: 0, to: width, by: downsampleFactor) {
+        let depthMeters = Double(row[x])
+        output.append(depthMeters * 100.0) // convert to centimeters for Flutter-side math
+      }
+    }
+
+    let backgroundDepth = output.max() ?? 0.0
+    let pixelSizeCm = 0.05 * Double(downsampleFactor)
+
+    return (output, targetWidth, targetHeight, pixelSizeCm, backgroundDepth)
   }
 
   private class PhotoDelegateWrapper: NSObject, AVCapturePhotoCaptureDelegate {

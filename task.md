@@ -31,6 +31,10 @@ This file tracks the major delivery items for PlateDepth. Tasks should be checke
 - [x] Create scripts for setup, build, and model downloads
 - [x] Establish CI hooks for linting and testing
 
+## Epic 6: Production Hardening
+- [x] Ticket-016: Wire depth-aware volume calculation end-to-end
+- [x] Ticket-017: Add runnable script for launching the Flutter client
+
 ## Usage Notes
 - Update this tracker whenever a ticket progresses.
 - Keep the checkboxes aligned with the actual state of the implementation.
