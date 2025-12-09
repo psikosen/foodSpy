@@ -30,6 +30,8 @@
 </array>
 <key>NSCameraUsageDescription</key>
 <string>Camera access is required to capture your meal.</string>
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Photo library access is needed to upload food photos for analysis.</string>
 <key>NSPhotoLibraryAddUsageDescription</key>
 <string>Photo library access is needed to save captures.</string>
 </dict>

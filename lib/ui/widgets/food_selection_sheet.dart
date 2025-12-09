@@ -80,7 +80,7 @@ class _FoodSelectionSheetState extends State<FoodSelectionSheet> {
               width: 60,
               height: 6,
               decoration: BoxDecoration(
-                color: Palette.deepText.withOpacity(0.1),
+                color: Palette.deepText.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -158,7 +158,7 @@ class _FoodSelectionSheetState extends State<FoodSelectionSheet> {
           decoration: InputDecoration(
             hintText: 'Search food...',
             filled: true,
-            fillColor: Palette.lilac.withOpacity(0.3),
+            fillColor: Palette.lilac.withValues(alpha: 0.3),
             prefixIcon: const Icon(Icons.search),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
           ),
@@ -171,7 +171,7 @@ class _FoodSelectionSheetState extends State<FoodSelectionSheet> {
           itemBuilder: (_, index) {
             final item = _items[index];
             return Card(
-              color: Palette.mint.withOpacity(0.5),
+              color: Palette.mint.withValues(alpha: 0.5),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: ListTile(
                 title: Text(item.name),

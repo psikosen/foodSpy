@@ -20,10 +20,11 @@ class FoodDatabase implements FoodDataSource {
   static final FoodDatabase instance = FoodDatabase._();
 
   static const _dbName = 'food_density.db';
-  static const _dbVersion = 1;
+  static const _dbVersion = 2; // Bumped for history tables
 
   Database? _db;
 
+  @override
   Future<void> initialize() async {
     if (_db != null) return;
     final dir = await getApplicationDocumentsDirectory();
@@ -33,7 +34,13 @@ class FoodDatabase implements FoodDataSource {
       version: _dbVersion,
       onCreate: (db, version) async {
         await _createSchema(db);
+        await _createHistorySchema(db);
         await _seed(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await _createHistorySchema(db);
+        }
       },
     );
   }
@@ -57,6 +64,33 @@ class FoodDatabase implements FoodDataSource {
         FOREIGN KEY(category_id) REFERENCES FoodCategories(id)
       );
     ''');
+  }
+
+  Future<void> _createHistorySchema(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS MealEntries(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        image_path TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        total_calories REAL NOT NULL DEFAULT 0
+      );
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS MealSegments(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        meal_id INTEGER NOT NULL,
+        food_item_id INTEGER NOT NULL,
+        food_name TEXT NOT NULL,
+        category_name TEXT NOT NULL,
+        volume_cm3 REAL NOT NULL,
+        mass_g REAL NOT NULL,
+        calories REAL NOT NULL,
+        segment_index INTEGER NOT NULL,
+        FOREIGN KEY(meal_id) REFERENCES MealEntries(id) ON DELETE CASCADE,
+        FOREIGN KEY(food_item_id) REFERENCES FoodItems(id)
+      );
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_meal_segments_meal_id ON MealSegments(meal_id);');
   }
 
   Future<void> _seed(Database db) async {
@@ -154,5 +188,111 @@ class FoodDatabase implements FoodDataSource {
       throw StateError('Database not initialized');
     }
     return db;
+  }
+
+  // ========== Meal History Methods ==========
+
+  /// Save a new meal entry with all its segments
+  Future<int> saveMealEntry(MealEntry meal, List<MealSegment> segments) async {
+    final db = _ensureDb();
+    
+    // Insert meal entry
+    final mealId = await db.insert('MealEntries', meal.toMap());
+    
+    // Insert all segments
+    final batch = db.batch();
+    for (final segment in segments) {
+      batch.insert('MealSegments', {
+        'meal_id': mealId,
+        'food_item_id': segment.foodItemId,
+        'food_name': segment.foodName,
+        'category_name': segment.categoryName,
+        'volume_cm3': segment.volumeCm3,
+        'mass_g': segment.massG,
+        'calories': segment.calories,
+        'segment_index': segment.segmentIndex,
+      });
+    }
+    await batch.commit(noResult: true);
+    
+    // Update total calories
+    final totalCalories = segments.fold<double>(0, (sum, s) => sum + s.calories);
+    await db.update(
+      'MealEntries',
+      {'total_calories': totalCalories},
+      where: 'id = ?',
+      whereArgs: [mealId],
+    );
+    
+    return mealId;
+  }
+
+  /// Fetch all meal entries (most recent first)
+  Future<List<MealEntry>> fetchMealEntries({int limit = 50}) async {
+    final db = _ensureDb();
+    final rows = await db.query(
+      'MealEntries',
+      orderBy: 'timestamp DESC',
+      limit: limit,
+    );
+    
+    final meals = <MealEntry>[];
+    for (final row in rows) {
+      final mealId = row['id'] as int;
+      final segmentRows = await db.query(
+        'MealSegments',
+        where: 'meal_id = ?',
+        whereArgs: [mealId],
+        orderBy: 'segment_index ASC',
+      );
+      final segments = segmentRows.map((s) => MealSegment.fromMap(s)).toList();
+      meals.add(MealEntry.fromMap(row, segments: segments));
+    }
+    
+    return meals;
+  }
+
+  /// Fetch a single meal entry with segments
+  Future<MealEntry?> fetchMealEntry(int mealId) async {
+    final db = _ensureDb();
+    final rows = await db.query(
+      'MealEntries',
+      where: 'id = ?',
+      whereArgs: [mealId],
+    );
+    
+    if (rows.isEmpty) return null;
+    
+    final segmentRows = await db.query(
+      'MealSegments',
+      where: 'meal_id = ?',
+      whereArgs: [mealId],
+      orderBy: 'segment_index ASC',
+    );
+    final segments = segmentRows.map((s) => MealSegment.fromMap(s)).toList();
+    
+    return MealEntry.fromMap(rows.first, segments: segments);
+  }
+
+  /// Delete a meal entry and all its segments
+  Future<void> deleteMealEntry(int mealId) async {
+    final db = _ensureDb();
+    await db.delete('MealSegments', where: 'meal_id = ?', whereArgs: [mealId]);
+    await db.delete('MealEntries', where: 'id = ?', whereArgs: [mealId]);
+  }
+
+  /// Get today's total calories
+  Future<double> fetchTodayCalories() async {
+    final db = _ensureDb();
+    final today = DateTime.now();
+    final startOfDay = DateTime(today.year, today.month, today.day);
+    final endOfDay = startOfDay.add(const Duration(days: 1));
+    
+    final result = await db.rawQuery(
+      'SELECT SUM(total_calories) as total FROM MealEntries WHERE timestamp >= ? AND timestamp < ?',
+      [startOfDay.toIso8601String(), endOfDay.toIso8601String()],
+    );
+    
+    return (result.first['total'] as num?)?.toDouble() ?? 0.0;
   }
 }

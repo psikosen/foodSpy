@@ -11,6 +11,7 @@ log() {
 
 if ! command -v flutter >/dev/null 2>&1; then
   log "Flutter is not installed. Install Flutter before running ${PROJECT_NAME}."
+  log "  https://docs.flutter.dev/get-started/install"
   exit 1
 fi
 
@@ -20,11 +21,30 @@ if [[ ! -f "${ROOT_DIR}/pubspec.yaml" ]]; then
 fi
 
 cd "${ROOT_DIR}"
-log "Fetching dependencies"
+
+log "=== ${PROJECT_NAME} Runner ==="
+log ""
+
+# Check for models
+model_count=$(find "${ROOT_DIR}/models" -type f \( -name "*.pth" -o -name "*.onnx" -o -name "*.mlpackage" -o -name "*.mlmodel" \) 2>/dev/null | wc -l || echo "0")
+if [[ $model_count -eq 0 ]]; then
+  log "⚠ Warning: No models found in models/"
+  log "  The app requires EdgeSAM models for segmentation."
+  log "  Run: ./scripts/download_models.sh"
+  log ""
+fi
+
+log "Fetching dependencies..."
 flutter pub get
 
-log "Launching ${PROJECT_NAME}"
+log ""
+log "Available devices:"
+flutter devices 2>/dev/null || true
+
+log ""
+log "Launching ${PROJECT_NAME}..."
 if [[ -n "$DEVICE_ID" ]]; then
+  log "Using device: $DEVICE_ID"
   flutter run --device-id "$DEVICE_ID"
 else
   flutter run
