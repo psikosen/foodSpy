@@ -16,7 +16,7 @@ class FoodSpyApp extends StatelessWidget {
         surface: Colors.white,
       ),
       useMaterial3: true,
-      fontFamily: 'SF Pro',
+      fontFamily: 'SF Pro',make gitignore
       scaffoldBackgroundColor: Palette.blush,
       snackBarTheme: const SnackBarThemeData(
         backgroundColor: Palette.peach,
